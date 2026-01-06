@@ -94,6 +94,9 @@ for (const file of commandFiles) {
 const cooldowns = new Map();    
 
 client.once(Events.ClientReady, async () => {
+    // Initialize database first
+    await db.initDatabase();
+    
     console.log(`Ready! Logged in as ${client.user.tag}`);
 
     //Deploy Commands
