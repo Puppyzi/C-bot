@@ -1,4 +1,4 @@
-# 🤖 Cult-bot
+# 🤖 C-bot
 A custom Discord bot developed for an active server
 
 ## **Unique Features**
@@ -12,8 +12,8 @@ Incorporates AI to summarize chat messages in channels, creates generated images
 
 1. **Clone repo**
    ```bash
-   git clone https://github.com/Puppyzi/Cult-bot.git
-   cd Cult-bot
+   git clone https://github.com/Puppyzi/C-bot.git
+   cd C-bot
    ```
 2. **Install dependencies**
    ```bash
