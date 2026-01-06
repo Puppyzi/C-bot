@@ -30,7 +30,7 @@ Incorporates AI to summarize chat messages in channels, creates generated images
   LOCATION=us-central1
   BOT_STATUS=online
   ACTIVITY_TYPE=PLAYING
-  ACTIVITY_NAME=with the cult
+  ACTIVITY_NAME=any
   ```
 - [Discord Developer Portal Guide](https://discord.com/developers/docs/intro) for Discord-specific tokens.
 
