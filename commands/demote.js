@@ -208,6 +208,16 @@ module.exports = {
                     `Their role will be automatically restored when the time is up.`
             });
 
+            // Trigger smart scheduler to account for new demotion
+            try {
+                const mainModule = require('../index.js');
+                if (mainModule.scheduleNextDemotionCheck && mainModule.getClient) {
+                    mainModule.scheduleNextDemotionCheck(mainModule.getClient());
+                }
+            } catch (e) {
+                // Scheduler will pick it up eventually
+            }
+
             console.log(`[Demotion] ${targetUser.tag} demoted from ${role.name} for ${hours}h ${minutes}m by ${interaction.user.tag}`);
 
         } catch (error) {

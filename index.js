@@ -133,9 +133,9 @@ client.once(Events.ClientReady, async () => {
     console.log(`Bot status set to: ${statusType}`);
     console.log(`Activity set to: ${activityType} ${activityName}`);
 
-    // Start demotion restoration checker (runs every 10 seconds)
-    setInterval(() => checkDemotions(client), 10 * 1000);
-    console.log('[Demotions] Auto-restore task started (checks every 10 seconds).');
+    // Start smart demotion scheduler
+    scheduleNextDemotionCheck(client);
+    console.log('[Demotions] Smart scheduler started.');
 });
 
 // Handle autocomplete interactions
@@ -293,6 +293,48 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
         }
     }
 });
+
+// Smart scheduler - only runs when there's a demotion to restore
+let nextCheckTimeout = null;
+
+function scheduleNextDemotionCheck(client) {
+    // Clear any existing scheduled check
+    if (nextCheckTimeout) {
+        clearTimeout(nextCheckTimeout);
+        nextCheckTimeout = null;
+    }
+
+    // Find the next demotion that needs to be restored
+    const nextDemotion = db.prepare(`
+        SELECT restore_at FROM demotions 
+        WHERE restored = 0 
+        ORDER BY restore_at ASC 
+        LIMIT 1
+    `).get();
+
+    if (!nextDemotion) {
+        console.log('[Demotions] No active demotions. Scheduler idle.');
+        return;
+    }
+
+    const now = Date.now();
+    const delay = Math.max(0, nextDemotion.restore_at - now);
+
+    // Add a small buffer (1 second) to ensure the time has passed
+    const scheduledDelay = delay + 1000;
+
+    console.log(`[Demotions] Next check scheduled in ${Math.round(scheduledDelay / 1000)} seconds.`);
+
+    nextCheckTimeout = setTimeout(async () => {
+        await checkDemotions(client);
+        // After processing, schedule the next check
+        scheduleNextDemotionCheck(client);
+    }, scheduledDelay);
+}
+
+// Export scheduler so demote command can trigger it
+module.exports.scheduleNextDemotionCheck = scheduleNextDemotionCheck;
+module.exports.getClient = () => client;
 
 // Function to check and restore demoted users
 async function checkDemotions(client) {
