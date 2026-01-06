@@ -20,10 +20,34 @@ Incorporates AI to summarize chat messages in channels, creates generated images
     npm install
    ```
 3. **Required variables**
-- Create a .env file. Obtain your own API token/keys to enable features.
+- Create a `.env` file with the following:
+  ```env
+  BOT_TOKEN=your_discord_bot_token
+  CLIENT_ID=your_discord_application_id
+  OPENAI_API_KEY=your_openai_api_key
+  HUGGINGFACE_API_KEY=your_huggingface_api_key
+  PROJECT_ID=your_google_cloud_project_id
+  LOCATION=us-central1
+  BOT_STATUS=online
+  ACTIVITY_TYPE=PLAYING
+  ACTIVITY_NAME=with the cult
+  ```
 - [Discord Developer Portal Guide](https://discord.com/developers/docs/intro) for Discord-specific tokens.
 
-4. **Run**
+4. **Google Cloud Setup (for /image command)**
+- Create a Google Cloud project and enable the Vertex AI API
+- Create a service account with Vertex AI permissions
+- Download the service account JSON key file
+- Set the environment variable:
+  ```bash
+  # Windows (PowerShell)
+  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\your\service-account.json"
+  
+  # Linux/Mac
+  export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/service-account.json"
+  ```
+
+5. **Run**
    ```bash
     npm start
    ```
