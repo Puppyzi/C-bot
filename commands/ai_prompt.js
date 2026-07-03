@@ -7,7 +7,7 @@ const { SlashCommandBuilder } = require("discord.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("ai_prompt")
-    .setDescription("prev using gpt 4.1 mini, now using google 3-flash-preview. (cutoff is may.2024)")
+    .setDescription("using google 3.5-flash. (cutoff is jan.2025)")
     .addStringOption(option =>
       option.setName("prompt")
         .setDescription("Your stateless question or message")
@@ -21,7 +21,7 @@ module.exports = {
 
     try {
       const model = genAI.getGenerativeModel({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.5-flash",
         systemInstruction: {
           role: "system",
           parts: [{ text: "You are a helpful assistant." }]
@@ -37,6 +37,7 @@ module.exports = {
       });
 
       const result = await model.generateContent(prompt);
+      console.log(`[ai_prompt] served by: ${result.response.modelVersion}`);
       const text = result.response.text();
 
       const reply = `**${prompt}**:\n\n${text}`;
