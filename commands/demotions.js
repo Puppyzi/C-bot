@@ -35,10 +35,12 @@ module.exports = {
         // Defer reply immediately to prevent timeout
         await interaction.deferReply();
 
-        // Only server owner can use this command
-        if (interaction.guild.ownerId !== interaction.user.id) {
-            return interaction.editReply({ 
-                content: `❌ Only the server owner can use this command!`
+        // Only the server owner and approved users (from .env) can use this command
+        const approvedIds = (process.env.APPROVED_USER_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+        const allowedUsers = [interaction.guild.ownerId, ...approvedIds];
+        if (!allowedUsers.includes(interaction.user.id)) {
+            return interaction.editReply({
+                content: `❌ You don't have permission to use this command!`
             });
         }
 
