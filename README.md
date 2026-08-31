@@ -16,41 +16,46 @@ Incorporates AI to summarize chat messages in channels, creates generated images
    git clone https://github.com/Puppyzi/C-bot.git
    cd C-bot
    ```
+
 2. **Install dependencies**
    ```bash
-    npm install
+   npm install
    ```
-3. **Required variables**
-- Create a `.env` file with the following:
-  ```env
-  BOT_TOKEN=your_discord_bot_token
-  CLIENT_ID=your_discord_application_id
-  OPENAI_API_KEY=your_openai_api_key
-  HUGGINGFACE_API_KEY=your_huggingface_api_key
-  PROJECT_ID=your_google_cloud_project_id
-  LOCATION=us-central1
-  BOT_STATUS=online
-  ACTIVITY_TYPE=PLAYING
-  ACTIVITY_NAME=any
-  ```
-- [Discord Developer Portal Guide](https://discord.com/developers/docs/intro) for Discord-specific tokens.
 
-4. **Google Cloud Setup (for /image command)**
-- Create a Google Cloud project and enable the Vertex AI API
-- Create a service account with Vertex AI permissions
-- Download the service account JSON key file
-- Set the environment variable:
-  ```bash
-  # Windows (PowerShell)
-  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\your\service-account.json"
-  
-  # Linux/Mac
-  export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/service-account.json"
-  ```
+3. **Create a `.env` file**
+   ```env
+   BOT_TOKEN=your_discord_bot_token
+   CLIENT_ID=your_discord_application_id
+   GUILD_ID=
 
-5. **Run**
+   GOOGLE_API_KEY=your_google_ai_api_key
+   HUGGINGFACE_API_KEY=your_huggingface_api_key
+
+   PROJECT_ID=your_google_cloud_project_id
+   LOCATION=us-central1
+   GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\your\service-account.json
+
+   BOT_STATUS=online
+   ACTIVITY_TYPE=PLAYING
+   ACTIVITY_NAME=any
+   APPROVED_USER_IDS=
+   ```
+
+   See the [Discord Developer Portal Guide](https://discord.com/developers/docs/intro) for Discord-specific tokens.
+
+4. **Google Cloud setup for `/image`**
+   - Create a Google Cloud project and enable the Vertex AI API
+   - Create a service account with Vertex AI permissions
+   - Download its JSON key and set `GOOGLE_APPLICATION_CREDENTIALS` to the file path
+
+5. **Deploy slash commands**
    ```bash
-    npm start
+   npm run deploy
    ```
 
-node.js./discord.js
+6. **Run**
+   ```bash
+   npm start
+   ```
+
+Built with [Node.js](https://nodejs.org/) 20+ and [discord.js](https://discord.js.org/).
