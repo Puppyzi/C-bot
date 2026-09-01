@@ -2,11 +2,27 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const dbPath = path.join(__dirname, 'cultbot.db');
+const dbPath = process.env.CULTBOT_DB_PATH
+    ? path.resolve(process.env.CULTBOT_DB_PATH)
+    : path.join(__dirname, 'cultbot.db');
 
 let db;
 let SQL;
 let initialized = false;
+
+function ensureColumn(columnName, definition) {
+    const columns = [];
+    const statement = db.prepare('PRAGMA table_info(demotions)');
+
+    while (statement.step()) {
+        columns.push(statement.getAsObject().name);
+    }
+    statement.free();
+
+    if (!columns.includes(columnName)) {
+        db.run(`ALTER TABLE demotions ADD COLUMN ${columnName} ${definition}`);
+    }
+}
 
 // Initialize the database
 async function initDatabase() {
@@ -34,8 +50,27 @@ async function initDatabase() {
             reason TEXT,
             demoted_at INTEGER NOT NULL,
             restore_at INTEGER NOT NULL,
-            restored INTEGER DEFAULT 0
+            restored INTEGER DEFAULT 0,
+            restored_at INTEGER,
+            next_attempt_at INTEGER,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT
         )
+    `);
+
+    // Migrate databases created by older versions of the bot.
+    ensureColumn('restored_at', 'INTEGER');
+    ensureColumn('next_attempt_at', 'INTEGER');
+    ensureColumn('attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn('last_error', 'TEXT');
+
+    db.run(`
+        CREATE INDEX IF NOT EXISTS idx_demotions_next_restore
+        ON demotions (restored, restore_at, next_attempt_at)
+    `);
+    db.run(`
+        CREATE INDEX IF NOT EXISTS idx_demotions_guild_active
+        ON demotions (guild_id, restored)
     `);
 
     // Save the database
@@ -51,12 +86,20 @@ function saveDatabase() {
     if (!db) return;
     const data = db.export();
     const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
+    const temporaryPath = `${dbPath}.tmp`;
+
+    // Write beside the database and rename it into place so an interrupted
+    // write cannot leave the main file only partially written.
+    fs.writeFileSync(temporaryPath, buffer);
+    fs.renameSync(temporaryPath, dbPath);
 }
 
 // Wrapper to mimic better-sqlite3 API
 const dbWrapper = {
     prepare: (sql) => {
+        if (!db) {
+            throw new Error('Database has not been initialized.');
+        }
         return {
             run: (...params) => {
                 db.run(sql, params);

@@ -17,13 +17,18 @@ module.exports = {
   async execute(interaction) {
     const prompt = interaction.options.getString('prompt');
     await interaction.deferReply();
+    let client;
 
     try {
       const projectId = process.env.PROJECT_ID;
       const location = process.env.LOCATION || 'us-central1';
 
+      if (!projectId) {
+        return interaction.editReply('Image generation is not configured. An administrator must add PROJECT_ID.');
+      }
+
       // Create Vertex AI Prediction client
-      const client = new PredictionServiceClient({
+      client = new PredictionServiceClient({
         apiEndpoint: `${location}-aiplatform.googleapis.com`,
       });
 
@@ -61,17 +66,26 @@ module.exports = {
 
       const buffer = Buffer.from(b64, 'base64');
 
+      if (buffer.length > 10 * 1024 * 1024) {
+        throw new Error(`Generated image is too large for the configured Discord upload limit (${buffer.length} bytes).`);
+      }
+
       // Send back to Discord
       await interaction.editReply({
-        content: `Here’s your AI image for: **${prompt}**`,
+        content: 'Here’s your AI image.',
         files: [{ attachment: buffer, name: 'generated.png' }],
+        allowedMentions: { parse: [] },
       });
 
     } catch (err) {
       console.error('[Imagen] Generation error:', err);
-      await interaction.editReply(
-        `❌ Error while generating image:\n\`\`\`${err.message || err}\`\`\``
-      );
+      await interaction.editReply('Image generation failed. Please try again later or ask an administrator to check the logs.');
+    } finally {
+      if (client) {
+        await client.close().catch(error => {
+          console.error('[Imagen] Failed to close the Vertex AI client:', error);
+        });
+      }
     }
   },
 };

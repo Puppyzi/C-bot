@@ -1,51 +1,9 @@
 require('dotenv').config();
-const fs = require('fs');
 const path = require('path');
-const { REST, Routes } = require('discord.js');
-// Use dynamic import for node-fetch
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
-// Database
 const db = require('./database/db.js');
-
-// Added global error handlers to prevent crashes
-process.on('uncaughtException', (err) => {
-    console.error(`[${new Date().toISOString()}] Uncaught Exception:`, err);
-});
-process.on('unhandledRejection', (err) => {
-    console.error(`[${new Date().toISOString()}] Unhandled Rejection:`, err);
-});
-
-const deployCommands = async () => {
-    try {
-        const commands = [];
-
-        const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
-
-        for (const file of commandFiles) {
-            const command = require(`./commands/${file}`);
-            if ('data' in command && 'execute' in command) {
-                commands.push(command.data.toJSON());
-            } else {
-                console.log(`WARNING: The command at ${file} is missing a required 'data' or 'execute' property.`);
-            }
-        }
-    
-
-    const rest = new REST().setToken(process.env.BOT_TOKEN);
-
-    console.log(`Started refreshing application slash commands globally.`);
-
-    const data = await rest.put(
-        Routes.applicationCommands(process.env.CLIENT_ID),
-        { body: commands },
-    );
-
-    console.log('Successfully reloaded all commands!');
-    } catch (error) {
-        console.error('Error deploying commands:', error)
-    }
-}
+const demotionScheduler = require('./services/demotionScheduler.js');
+const { loadCommands } = require('./utils/commandLoader.js');
+const { reportOptionalFeatureConfiguration, requireEnvironmentVariables } = require('./utils/environment.js');
 
 const { 
     Client, 
@@ -54,7 +12,8 @@ const {
     Collection,
     ActivityType,
     PresenceUpdateStatus,
-    Events
+    Events,
+    MessageFlags
 } = require('discord.js');
 
 const client = new Client({
@@ -73,35 +32,13 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-
-
-
 const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-
-    if ('data' in command && 'execute' in command) {
-        client.commands.set(command.data.name, command);
-    } else {
-        console.log(`The Command ${filePath} is missing a required "data" or "execute" property.`)
-    }
+for (const command of loadCommands(commandsPath)) {
+    client.commands.set(command.data.name, command);
 }
 
-// cooldown for rapid commands
-const cooldowns = new Map();    
-
-client.once(Events.ClientReady, async () => {
-    // Initialize database first
-    await db.initDatabase();
-    
+client.once(Events.ClientReady, () => {
     console.log(`Ready! Logged in as ${client.user.tag}`);
-
-    //Deploy Commands
-    await deployCommands();
-    console.log(`Commands deployed globally.`);
 
     const statusType = process.env.BOT_STATUS || 'online';
     const activityType = process.env.ACTIVITY_TYPE || ''; //constant activity_type should be 'Playing'.
@@ -122,19 +59,24 @@ client.once(Events.ClientReady, async () => {
         'invisible': PresenceUpdateStatus.Invisible
     };
 
-    client.user.setPresence({
-        status: statusMap[statusType],
-        activities: [{
+    const presence = {
+        status: statusMap[statusType] || PresenceUpdateStatus.Online,
+        activities: []
+    };
+
+    if (activityName && activityTypeMap[activityType] !== undefined) {
+        presence.activities.push({
             name: activityName,
             type: activityTypeMap[activityType]
-        }]
-    });
+        });
+    }
+
+    client.user.setPresence(presence);
     
     console.log(`Bot status set to: ${statusType}`);
     console.log(`Activity set to: ${activityType} ${activityName}`);
 
-    // Start smart demotion scheduler
-    scheduleNextDemotionCheck(client);
+    demotionScheduler.startDemotionScheduler(client);
     console.log('[Demotions] Smart scheduler started.');
 });
 
@@ -162,25 +104,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return;
     }
 
-    // cooldown check to prevent rapid commands
-    const now = Date.now();
-    const cooldownAmount = 5000; // 5-second cooldown per user
-    const userId = interaction.user.id;
-    if (cooldowns.has(userId)) {
-        const expirationTime = cooldowns.get(userId);
-        if (now < expirationTime) {
-            const timeLeft = (expirationTime - now) / 1000;
-            try {
-                await interaction.reply({ content: `Please wait ${timeLeft.toFixed(1)} seconds before using /${interaction.commandName} again.`, flags: 64 });
-            } catch (err) {
-                console.error(`[${new Date().toISOString()}] Failed to send cooldown reply:`, err);
-            }
-            return;
-        }
-    }
-    cooldowns.set(userId, now + cooldownAmount);
-    setTimeout(() => cooldowns.delete(userId), cooldownAmount);
-
     try {
         console.log(`[${new Date().toISOString()}] Executing ${interaction.commandName} for user ${interaction.user.id}...`);
         await command.execute(interaction);
@@ -190,7 +113,10 @@ client.on(Events.InteractionCreate, async interaction => {
             if (interaction.deferred) {
                 await interaction.editReply({ content: 'There was an error while executing this command!' });
             } else if (!interaction.replied) {
-                await interaction.reply({ content: 'There was an error while executing this command!', flags: 64 });
+                await interaction.reply({
+                    content: 'There was an error while executing this command!',
+                    flags: MessageFlags.Ephemeral
+                });
             }
         } catch (replyError) {
             console.error(`[${new Date().toISOString()}] Failed to send error reply:`, replyError);
@@ -213,12 +139,6 @@ client.on("guildMemberAdd", member => {
     }
 });
 
-// Demotion protection - prevents manually giving back roles during active demotion
-// Track which demotions are currently being restored (to prevent protection from interfering)
-const restoringDemotions = new Set();
-// Lock to prevent multiple checkDemotions from running simultaneously
-let isCheckingDemotions = false;
-
 client.on("guildMemberUpdate", async (oldMember, newMember) => {
     // Find roles that were ADDED (in new but not in old)
     const addedRoles = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
@@ -228,8 +148,7 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     // Check each added role against active demotions
     for (const [roleId, role] of addedRoles) {
         // Skip if this demotion is being restored by the bot
-        const demotionKey = `${newMember.id}-${roleId}`;
-        if (restoringDemotions.has(demotionKey)) {
+        if (demotionScheduler.isRestoring(newMember.id, roleId)) {
             continue; // Bot is restoring this, don't interfere
         }
 
@@ -294,122 +213,40 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     }
 });
 
-// Smart scheduler - only runs when there's a demotion to restore
-let nextCheckTimeout = null;
+let isShuttingDown = false;
 
-function scheduleNextDemotionCheck(client) {
-    // Clear any existing scheduled check
-    if (nextCheckTimeout) {
-        clearTimeout(nextCheckTimeout);
-        nextCheckTimeout = null;
-    }
-
-    // Find the next demotion that needs to be restored
-    const nextDemotion = db.prepare(`
-        SELECT restore_at FROM demotions 
-        WHERE restored = 0 
-        ORDER BY restore_at ASC 
-        LIMIT 1
-    `).get();
-
-    if (!nextDemotion) {
-        console.log('[Demotions] No active demotions. Scheduler idle.');
-        return;
-    }
-
-    const now = Date.now();
-    const delay = Math.max(0, nextDemotion.restore_at - now);
-
-    // Add a small buffer (1 second) to ensure the time has passed
-    const scheduledDelay = delay + 1000;
-
-    console.log(`[Demotions] Next check scheduled in ${Math.round(scheduledDelay / 1000)} seconds.`);
-
-    nextCheckTimeout = setTimeout(async () => {
-        await checkDemotions(client);
-        // After processing, schedule the next check
-        scheduleNextDemotionCheck(client);
-    }, scheduledDelay);
+function shutdown(reason, exitCode = 0) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[Shutdown] ${reason}`);
+    demotionScheduler.stopDemotionScheduler();
+    client.destroy();
+    process.exitCode = exitCode;
 }
 
-// Export scheduler so demote command can trigger it
-module.exports.scheduleNextDemotionCheck = scheduleNextDemotionCheck;
-module.exports.getClient = () => client;
+process.once('SIGINT', () => shutdown('SIGINT received.'));
+process.once('SIGTERM', () => shutdown('SIGTERM received.'));
+process.on('uncaughtException', error => {
+    console.error(`[${new Date().toISOString()}] Uncaught exception:`, error);
+    shutdown('Fatal uncaught exception.', 1);
+});
+process.on('unhandledRejection', error => {
+    console.error(`[${new Date().toISOString()}] Unhandled rejection:`, error);
+    shutdown('Fatal unhandled rejection.', 1);
+});
 
-// Function to check and restore demoted users
-async function checkDemotions(client) {
-    // Prevent multiple simultaneous executions
-    if (isCheckingDemotions) {
-        return;
-    }
-    isCheckingDemotions = true;
-
-    try {
-        const now = Date.now();
-        
-        // Get all demotions that should be restored
-        const expiredDemotions = db.prepare(`
-            SELECT * FROM demotions WHERE restore_at <= ? AND restored = 0
-        `).all(now);
-
-        for (const demotion of expiredDemotions) {
-            const demotionKey = `${demotion.user_id}-${demotion.role_id}`;
-            
-            // Skip if already being processed (shouldn't happen with lock, but extra safety)
-            if (restoringDemotions.has(demotionKey)) {
-                continue;
-            }
-            
-            // Mark as restoring to prevent protection from interfering
-            restoringDemotions.add(demotionKey);
-            
-            // Mark as restored in database FIRST to prevent re-processing
-            db.prepare('UPDATE demotions SET restored = 1 WHERE id = ?').run(demotion.id);
-
-            try {
-                const guild = await client.guilds.fetch(demotion.guild_id).catch(() => null);
-                if (!guild) {
-                    console.log(`[Demotions] Guild ${demotion.guild_id} not found.`);
-                    restoringDemotions.delete(demotionKey);
-                    continue;
-                }
-
-                const member = await guild.members.fetch(demotion.user_id).catch(() => null);
-                if (!member) {
-                    console.log(`[Demotions] User ${demotion.user_id} not found in guild.`);
-                    restoringDemotions.delete(demotionKey);
-                    continue;
-                }
-
-                const role = guild.roles.cache.get(demotion.role_id);
-                if (!role) {
-                    console.log(`[Demotions] Role ${demotion.role_id} no longer exists.`);
-                    restoringDemotions.delete(demotionKey);
-                    continue;
-                }
-
-                // Restore the role
-                await member.roles.add(role, 'Timed demotion expired - role restored automatically');
-
-                console.log(`[Demotions] Restored ${role.name} to ${member.user.tag} in ${guild.name}`);
-
-                // Try to DM the user
-                try {
-                    await member.send(`✅ Your temporary demotion has ended! Your **${role.name}** role in **${guild.name}** has been restored.`);
-                } catch (dmError) {
-                    // User has DMs disabled, that's fine
-                }
-
-            } catch (error) {
-                console.error(`[Demotions] Error restoring demotion ${demotion.id}:`, error);
-            } finally {
-                // Clean up the tracking set after a short delay
-                setTimeout(() => restoringDemotions.delete(demotionKey), 5000);
-            }
-        }
-    } finally {
-        isCheckingDemotions = false;
-    }
+async function start() {
+    requireEnvironmentVariables(['BOT_TOKEN']);
+    reportOptionalFeatureConfiguration();
+    await db.initDatabase();
+    await client.login(process.env.BOT_TOKEN);
 }
 
-client.login(process.env.BOT_TOKEN);
+if (require.main === module) {
+    start().catch(error => {
+        console.error('Failed to start Cult-bot:', error);
+        shutdown('Startup failed.', 1);
+    });
+}
+
+module.exports = { client, shutdown, start };

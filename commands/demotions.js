@@ -1,5 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const db = require('../database/db.js');
+const demotionScheduler = require('../services/demotionScheduler.js');
+const { truncateText } = require('../utils/text.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -75,7 +77,7 @@ async function handleList(interaction) {
     let description = '';
     const now = Date.now();
     
-    for (const demotion of activeDemotions) {
+    for (const demotion of activeDemotions.slice(0, 10)) {
         const user = await interaction.client.users.fetch(demotion.user_id).catch(() => null);
         const demotedBy = await interaction.client.users.fetch(demotion.demoted_by).catch(() => null);
         
@@ -94,7 +96,18 @@ async function handleList(interaction) {
         description += `└ Role: **${demotion.role_name}**\n`;
         description += `└ Restores: ${restoreDisplay}\n`;
         description += `└ By: ${demotedBy ? demotedBy.tag : 'Unknown'}\n`;
-        description += `└ Reason: ${demotion.reason || 'None'}\n\n`;
+        description += `└ Reason: ${truncateText(demotion.reason || 'None', 160)}\n\n`;
+
+        if (demotion.last_error) {
+            const retryAt = demotion.next_attempt_at
+                ? `<t:${Math.floor(demotion.next_attempt_at / 1000)}:R>`
+                : 'soon';
+            description += `⚠️ Last restore attempt failed; retrying ${retryAt}.\n\n`;
+        }
+    }
+
+    if (activeDemotions.length > 10) {
+        description += `*Showing the first 10 of ${activeDemotions.length} active demotions.*`;
     }
 
     embed.setDescription(description);
@@ -134,33 +147,49 @@ async function handleRestore(interaction) {
 
     let restoredCount = 0;
     const restoredRoles = [];
+    const failedRoles = [];
 
     for (const demotion of demotions) {
-        const roleToRestore = interaction.guild.roles.cache.get(demotion.role_id);
-        
-        // Mark as restored in database FIRST (prevents protection from interfering)
-        db.prepare('UPDATE demotions SET restored = 1 WHERE id = ?').run(demotion.id);
-        
-        if (roleToRestore) {
-            try {
-                await targetMember.roles.add(roleToRestore, `Early restoration by ${interaction.user.tag}`);
-                restoredRoles.push(demotion.role_name);
-                restoredCount++;
-            } catch (err) {
-                console.error(`[Demotions] Failed to restore role ${demotion.role_name}:`, err);
-            }
+        const result = await demotionScheduler.restoreDemotion(demotion, {
+            auditReason: `Early restoration by ${interaction.user.tag}`,
+            notifyUser: false
+        });
+
+        if (result.restored) {
+            restoredRoles.push(demotion.role_name);
+            restoredCount++;
+        } else {
+            failedRoles.push(demotion.role_name);
         }
     }
 
+    demotionScheduler.scheduleNextDemotionCheck();
+
+    const resultLines = [`✅ Restored ${restoredCount} role(s) to ${targetUser.tag}.`];
+    if (restoredRoles.length > 0) {
+        resultLines.push(`**Restored:** ${restoredRoles.join(', ')}`);
+    }
+    if (failedRoles.length > 0) {
+        resultLines.push(`⚠️ **Still pending:** ${failedRoles.join(', ')}. Automatic retries remain scheduled.`);
+    }
+
     await interaction.editReply({
-        content: `✅ Restored ${restoredCount} role(s) to ${targetUser.tag}: **${restoredRoles.join(', ')}**`
+        content: truncateText(resultLines.join('\n'), 1900),
+        allowedMentions: { parse: [] }
     });
 
-    // Try to DM the user
-    try {
-        await targetMember.send(`✅ Your demotion has been lifted early! Your role(s) **${restoredRoles.join(', ')}** in **${interaction.guild.name}** have been restored by ${interaction.user.tag}.`);
-    } catch (dmError) {
-        // DMs disabled
+    if (restoredRoles.length > 0) {
+        try {
+            await targetMember.send(
+                truncateText(
+                    `Your demotion has been lifted early. Your role(s) **${restoredRoles.join(', ')}** ` +
+                    `in **${interaction.guild.name}** were restored by ${interaction.user.tag}.`,
+                    1900
+                )
+            );
+        } catch {
+            // DMs may be disabled.
+        }
     }
 }
 
@@ -192,7 +221,7 @@ async function handleHistory(interaction) {
         description += `**${record.role_name}** - ${status}\n`;
         description += `└ Demoted: <t:${Math.floor(record.demoted_at / 1000)}:R>\n`;
         description += `└ By: ${demotedBy ? demotedBy.tag : 'Unknown'}\n`;
-        description += `└ Reason: ${record.reason || 'None'}\n\n`;
+        description += `└ Reason: ${truncateText(record.reason || 'None', 160)}\n\n`;
     }
 
     embed.setDescription(description);

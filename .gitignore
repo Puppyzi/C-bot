@@ -4,5 +4,6 @@ node_modules
 
 # Database files
 database/*.db
+database/*.db.tmp
 database/*.db-shm
 database/*.db-wal

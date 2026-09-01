@@ -12,7 +12,8 @@ module.exports = {
         .addStringOption(option => 
             option.setName('reason')
                 .setDescription('Reason for banning')
-                .setRequired(false))
+                .setRequired(false)
+                .setMaxLength(500))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
     async execute(interaction) {
         const target = interaction.options.getUser('target');
@@ -32,7 +33,10 @@ module.exports = {
         // Attempt to ban the user
         try {
             await interaction.guild.members.ban(target, { reason });
-            await interaction.reply(`Successfully banned **${target.tag}** from the server.\nReason: ${reason}`);
+            await interaction.reply({
+                content: `Successfully banned **${target.tag}** from the server.\nReason: ${reason}`,
+                allowedMentions: { parse: [] }
+            });
         } catch (error) {
             console.error(error);
             await interaction.reply({ content: 'There was an error trying to ban this user!', ephemeral: true });

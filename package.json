@@ -3,20 +3,22 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "deploy": "node deploy-commands.js",
+    "start": "node index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "keywords": [],
   "author": "Andrew",
   "license": "MIT",
-  "description": "",
+  "description": "A custom Discord community bot with AI tools and timed role demotions.",
   "dependencies": {
     "@google-cloud/aiplatform": "^5.6.0",
     "@google/generative-ai": "^0.24.1",
     "discord.js": "^14.22.1",
     "dotenv": "^17.2.1",
-    "node-fetch": "^3.3.2",
-    "openai": "^5.15.0",
     "sql.js": "^1.13.0"
   }
 }

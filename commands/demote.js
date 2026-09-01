@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const db = require('../database/db.js');
+const demotionScheduler = require('../services/demotionScheduler.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -29,7 +30,8 @@ module.exports = {
         .addStringOption(option =>
             option.setName('reason')
                 .setDescription('Reason for the demotion')
-                .setRequired(false))
+                .setRequired(false)
+                .setMaxLength(500))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
     async autocomplete(interaction) {
@@ -162,10 +164,13 @@ module.exports = {
         const restoreAt = now + totalMilliseconds;
 
         try {
-            // Remove the role
             await targetMember.roles.remove(role, `Timed demotion by ${interaction.user.tag}: ${reason}`);
+        } catch (error) {
+            console.error('[Demotion] Failed to remove role:', error);
+            return interaction.editReply({ content: '❌ Failed to remove that role. Check my role permissions and hierarchy.' });
+        }
 
-            // Save to database
+        try {
             db.prepare(`
                 INSERT INTO demotions (user_id, guild_id, role_id, role_name, demoted_by, reason, demoted_at, restore_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -179,27 +184,40 @@ module.exports = {
                 now,
                 restoreAt
             );
+        } catch (error) {
+            console.error('[Demotion] Failed to save demotion; restoring removed role:', error);
 
-            // Format duration display
-            let durationParts = [];
-            const totalHours = hours + (minutes / 60);
-            
-            if (totalHours >= 24) {
-                const days = Math.floor(totalHours / 24);
-                durationParts.push(`${days} day${days > 1 ? 's' : ''}`);
+            try {
+                await targetMember.roles.add(role, 'Demotion record could not be saved - rolling back');
+            } catch (rollbackError) {
+                console.error('[Demotion] CRITICAL: Failed to roll back removed role:', rollbackError);
             }
-            
-            const displayHours = hours % 24;
-            if (displayHours > 0) {
-                durationParts.push(`${displayHours} hour${displayHours > 1 ? 's' : ''}`);
-            }
-            
-            if (minutes > 0) {
-                durationParts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
-            }
-            
-            const durationDisplay = durationParts.join(' ');
 
+            return interaction.editReply({
+                content: '❌ The demotion could not be saved, so I attempted to put the role back. Please check the logs.'
+            });
+        }
+
+        const durationParts = [];
+        const totalHours = hours + (minutes / 60);
+
+        if (totalHours >= 24) {
+            const days = Math.floor(totalHours / 24);
+            durationParts.push(`${days} day${days > 1 ? 's' : ''}`);
+        }
+
+        const displayHours = hours % 24;
+        if (displayHours > 0) {
+            durationParts.push(`${displayHours} hour${displayHours > 1 ? 's' : ''}`);
+        }
+
+        if (minutes > 0) {
+            durationParts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
+        }
+
+        const durationDisplay = durationParts.join(' ');
+
+        try {
             await interaction.editReply({
                 content: `⬇️ **Demotion Successful!**\n\n` +
                     `**User:** ${targetUser.tag}\n` +
@@ -207,24 +225,14 @@ module.exports = {
                     `**Duration:** ${durationDisplay}\n` +
                     `**Restore Time:** <t:${Math.floor(restoreAt / 1000)}:F>\n` +
                     `**Reason:** ${reason}\n\n` +
-                    `Their role will be automatically restored when the time is up.`
+                    `Their role will be automatically restored when the time is up.`,
+                allowedMentions: { parse: [] }
             });
-
-            // Trigger smart scheduler to account for new demotion
-            try {
-                const mainModule = require('../index.js');
-                if (mainModule.scheduleNextDemotionCheck && mainModule.getClient) {
-                    mainModule.scheduleNextDemotionCheck(mainModule.getClient());
-                }
-            } catch (e) {
-                // Scheduler will pick it up eventually
-            }
-
-            console.log(`[Demotion] ${targetUser.tag} demoted from ${role.name} for ${hours}h ${minutes}m by ${interaction.user.tag}`);
-
         } catch (error) {
-            console.error('[Demotion] Error:', error);
-            await interaction.editReply({ content: '❌ Failed to demote user. Check my permissions!' });
+            console.error('[Demotion] Role was removed and saved, but the confirmation reply failed:', error);
         }
+
+        demotionScheduler.scheduleNextDemotionCheck();
+        console.log(`[Demotion] ${targetUser.tag} demoted from ${role.name} for ${hours}h ${minutes}m by ${interaction.user.tag}`);
     }
 };
