@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
+    guildOnly: true,
     data: new SlashCommandBuilder()
         .setName('nohoi4')
         .setDescription('SO THERE IS NO HOI 4 TODAY'),

@@ -26,7 +26,7 @@ Incorporates AI to summarize chat messages in channels, creates generated images
    ```env
    BOT_TOKEN=your_discord_bot_token
    CLIENT_ID=your_discord_application_id
-   GUILD_ID=
+   GUILD_ID=your_server_id_for_server_specific_commands
 
    GOOGLE_API_KEY=your_google_ai_api_key
    HUGGINGFACE_API_KEY=your_huggingface_api_key
@@ -52,6 +52,8 @@ Incorporates AI to summarize chat messages in channels, creates generated images
    ```bash
    npm run deploy
    ```
+
+   The HOI4 commands are deployed only to the server matching `GUILD_ID`. All other commands are deployed globally.
 
 6. **Run**
    ```bash

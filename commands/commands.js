@@ -6,7 +6,9 @@ module.exports = {
         .setDescription('Lists all Cult-bot commands'),
     async execute(interaction) {
         // Dynamically generate command list from registered commands
-        const commands = interaction.client.commands;
+        const commands = interaction.client.commands.filter(command =>
+            !command.guildOnly || interaction.guildId === process.env.GUILD_ID
+        );
         
         const commandList = commands.map(cmd => {
             return `**/${cmd.data.name}** - ${cmd.data.description}`;

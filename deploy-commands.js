@@ -5,24 +5,41 @@ const { REST, Routes } = require('discord.js');
 const { loadCommands } = require('./utils/commandLoader.js');
 const { requireEnvironmentVariables } = require('./utils/environment.js');
 
+function partitionCommands(commands) {
+    return {
+        globalCommands: commands.filter(command => !command.guildOnly),
+        guildCommands: commands.filter(command => command.guildOnly)
+    };
+}
+
 async function deployCommands() {
     requireEnvironmentVariables(['BOT_TOKEN', 'CLIENT_ID']);
 
     const commandsPath = path.join(__dirname, 'commands');
-    const body = loadCommands(commandsPath).map(command => command.data.toJSON());
+    const { globalCommands, guildCommands } = partitionCommands(loadCommands(commandsPath));
+    const globalBody = globalCommands.map(command => command.data.toJSON());
+    const guildBody = guildCommands.map(command => command.data.toJSON());
     const rest = new REST().setToken(process.env.BOT_TOKEN);
+    const deployments = [];
 
-    if (process.env.GUILD_ID) {
-        console.log(`Deploying ${body.length} commands to guild ${process.env.GUILD_ID}...`);
-        await rest.put(
+    console.log(`Deploying ${globalBody.length} global commands...`);
+    deployments.push(
+        rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: globalBody })
+    );
+
+    if (guildBody.length > 0 && process.env.GUILD_ID) {
+        console.log(`Deploying ${guildBody.length} server-specific commands to guild ${process.env.GUILD_ID}...`);
+        deployments.push(rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body }
+            { body: guildBody }
+        ));
+    } else if (guildBody.length > 0) {
+        console.warn(
+            `Skipping ${guildBody.length} server-specific commands because GUILD_ID is not configured.`
         );
-    } else {
-        console.log(`Deploying ${body.length} commands globally...`);
-        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body });
     }
 
+    await Promise.all(deployments);
     console.log('Slash commands deployed successfully.');
 }
 
@@ -33,4 +50,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { deployCommands };
+module.exports = { deployCommands, partitionCommands };
